@@ -1,11 +1,11 @@
 /*
 Problems: Text always starts with first headline not with any Text.
 */
-var pandoc = require('pandoc-filter'),
-	stdin  = require('get-stdin'),
+var stdin  = require('get-stdin'),
+	pandoc = require('pandoc-filter'),
 	child_process = require('child_process'),
 	getSplitpoints, //function
-	splitPandocJSONFull,
+	splitPandocJSONFull, //function
 	findLinks,
 	findTargetIndex,
 	createDocumentFilename,
@@ -13,13 +13,15 @@ var pandoc = require('pandoc-filter'),
 	titleSeperator = " – "; //seperates generalTitle from part Title
 
 
-stdin(function(stringJSON){
+stdin().then(function(stringJSON){
+	console.log("gotstdin");
 	var pandocJSONFull =  JSON.parse(stringJSON);
-	var splits = getSplitpoints(pandocJSONFull);
 
-	var documentsArray = splitPandocJSONFull(pandocJSONFull,splits);
+	var splits = getSplitpoints(pandocJSONFull); //helper to generate markers of where to split the document
 
-	var newDocs = findLinks(documentsArray);
+	var documentsArray = splitPandocJSONFull(pandocJSONFull,splits); //Splits input document along splits in an array of Pandoc-JSONs.
+
+	var newDocs = findLinks(documentsArray); //returns array of Pandoc-JSONs with rewritten links and a string for filename.
 
 	//console.log(JSON.stringify(newDocs[1]));
 	/*
@@ -31,24 +33,42 @@ stdin(function(stringJSON){
 
 	//new docs: array[n].doc array[n].doc array[n]filename
 	newDocs.forEach(function(element, index, array){
-		var process = "pandoc"
-		var format = "html"
+		var process = "pandoc";
+		var format = "html";
 		var filename = element.filename;
-		if (filename.length === 0){filename = "filename"+index}
-		var arguments = ["--from json",("-o "+filename+".html")];
+		if (filename.length === 0){
+			filename = "filename"+index;
+		}
+		var pandocArguments = ["--from json",("-o "+filename+".html")];
 		var pandocify = JSON.stringify(element.doc);
-		var whathappend = child_process.execSync('pandoc'+' '+arguments.join(" "),{input:pandocify});
+		var whathappend = child_process.execSync('pandoc'+' '+pandocArguments.join(" "),{input:pandocify});
 		console.log(whathappend);
 	});
 
+}).catch(function(reason){
+	console.error(reason);
 });
 
 getSplitpoints = function(pandocJSONFull){
+	//DOES: Finds chapter headlines and their indicies
+	//GETS: pandoc JSON
+	//RETURNS: an array of objects:
+	// [
+	// {mainindex ← the index of the headline in the pandoc JSON BLOCK array
+	//  title ← the headline, stripped of non-word characters},
+	//…]
+
 	var splitPoints = [];
 //array with objects {start:#, end#} for saving the node with the headline in the first, the node before the next headline in the second.
-	pandocJSONFull[1].forEach(function(element, index, array){
-		if (element.t === "Header" && element.c[0] == 1){//headline first order
-			splitPoints.push({"mainindex":index,"title":pandoc.stringify(element.c).replace(/\W/g, '')});
+	pandocJSONFull.blocks.forEach(function(element, index, array){
+		if (element.t === "Header" && element.c[0] == 1){//headline first order aka chapter
+			splitPoints.push({
+				"mainindex":index,
+				"title":pandoc. //NOTE: Do I ever need th title? For the filenames and links, the title/filename is generated in the "findLinks" function
+					stringify(element.c). //stringify makes a part of the tree to a simple string with no formatting
+					replace(/\W/g, '') 	//Strips all non-word characters
+								//TODO: what about öä etc.? "ae äé".replace(/\W/,"") strips "ä" but not "é"
+			});
 		}
 	});
 
@@ -59,49 +79,65 @@ getSplitpoints = function(pandocJSONFull){
 };
 
 splitPandocJSONFull = function(pandocJSONFull, splitPoints){
-	//returns: Array with Pandoc-JSONs
-	var documentsArray = []
+	//DOES: Splits the full PandocJSON in an array of chapter length PandocJSON Objects
+	//GETS:
+	//  pandocJSONFull: a PandocJSON of the full document
+	//  splitPoints: an array  ob ojjects, each like
+	// {mainindex ← the index of the headline in the pandoc JSON BLOCK array
+	//  title ← the headline of the chapter, stripped of non-word characters}
+	//
+	//RETURNS: Array with Pandoc-JSONs, each a chapter of the original document
+	var chapterArray = [];
 
 
 	splitPoints.forEach(function(element, index, array){
-		var startPoint,
-			endPoint;
-
+		var startPoint=null,
+			endPoint=null,
+			chapter ={},
+			chapterBlocks =[];
 
 		startPoint = element.mainindex;
 
-
 		if(index === array.length-1){ //last iteration
-			endPoint = pandocJSONFull[1].length;//end with the last main Document element. NOT length-1 since the last node should be included in contrast to the next headline!
+			endPoint = pandocJSONFull.blocks.length;//end with the last main Document element. NOT length-1 since the last node should be included in contrast to the next headline!
 		} else{//all other iterations
 			endPoint = array[index+1].mainindex;//end before next headline
 		}
 
-
-		var singleDocumentArray = pandocJSONFull[1].slice(startPoint, endPoint);
+		//get the blocks of a chapter from the pandocJSON
 		//NOTE: Array.slice does copy contained objects by reference. This is o.k. since we don’t want to have the same content twice in different documents.
 		//REMEMBER: Array.slice copies up to, but not including, endPoint!
+		chapterBlocks = pandocJSONFull.blocks.slice(startPoint, endPoint);
 
-		var metadata = JSON.parse(JSON.stringify(pandocJSONFull[0])); //sorta dirty trick to deep copy function-less objects: http://stackoverflow.com/a/122704/263398
-		documentsArray.push([metadata,singleDocumentArray]);
+		//create a synthetic pandoc JSON object from the
+		chapter={
+			"meta": JSON.parse(JSON.stringify(pandocJSONFull.meta)), //sorta dirty trick to deep copy function-less objects: http://stackoverflow.com/a/122704/263398
+			"blocks": chapterBlocks,
+			"pandoc-api-version":JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
+		};
+
+		chapterArray.push(chapter); //TODO
 	});
 
-	return documentsArray;
+	return chapterArray;
 };
 
 findLinks = function (documentsArray){ //finds internal links
+	//DOES: rewrites all links in a pandocJSON which has internal links to external links if they link to another chapter.
+	//GETS: array with pandocJSON documents.
+	//RETURNS: array with pandocJSON documents with rewritten links.
+
 	var rewrittenLinksArray = [];
 
 	documentsArray.forEach(function(element, index, array){
 		rewrittenLinksArray[index]={};
 		rewrittenLinksArray[index].filename = createDocumentFilename(documentsArray[index]);
+		console.log("ELEMENT:\n \n ",element,"|", index);
 		rewrittenLinksArray[index].doc = pandoc.walk(
 				element,
 				function(type,value,format,meta){
-					//console.log(type,value);
-
-					if (type == "Link" && value[1][0].indexOf("#") === 0){// === sourceLinkId.slice(1)){
-
+					if (type === "Link" && value[2][0].indexOf("#") === 0){// === sourceLinkId.slice(1)){
+						console.log("in")
 						var targetIndex = findTargetIndex(documentsArray,value[1][0]);
 
 						if(typeof targetIndex !== "number"){
@@ -115,20 +151,22 @@ findLinks = function (documentsArray){ //finds internal links
 
 							//return pandoc.Link(value[0],value[1]);
 
-							newValue[1][0] = filename+"."+format+value[1][0];//creates link to  OTHER document);
-							console.log(newValue)
+							newValue[2][0] = filename+"."+format+value[2][0];//creates link to  OTHER document);
+							console.log(newValue);
 							return {t:'Link',c:newValue};
 						}
 					};//endif
-				},"html",element[0].unMeta);//find linksunMeta
+				},"html",element.meta);//find links
 	});//end foreach
 	return rewrittenLinksArray;
 };//endfunction
 
 createDocumentFilename = function(singleDocumentArray){
+	//GETS: a pandocJSON
+	//RETURNS: a filename for the document made of the Pandoc-JSON.
 	var namestring;
-	if(singleDocumentArray[1][0].t === "Header"){
-		namestring = pandoc.stringify(singleDocumentArray[1][0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
+	if(singleDocumentArray.blocks[0].t === "Header"){
+		namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
 	}else{
 		namestring = pandoc.stringify(singleDocumentArray).slice(0,10).replace(/\W/g, ''); //this is rather inefficient to walk all the subtree (pandoc.stringify) to create a filename
 	}
@@ -150,12 +188,7 @@ findTargetIndex = function(documentsArray,sourceLinkId){ //
 					targetDocumentIndex = index;
 					}//endif
 					return undefined;
-			},"html", element[0].unMeta);//end walk find targets
+			},"html", element.meta);//end walk find targets
 	});
 	return 	targetDocumentIndex;
 };
-
-
-
-
-
