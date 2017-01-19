@@ -155,7 +155,7 @@ findLinks = function (documentsArray){ //finds internal links
 							console.log(newValue);
 							return {t:'Link',c:newValue};
 						}
-					};//endif
+					}//endif
 				},"html",origDocument.meta);//find links
 	});//end foreach
 	return rewrittenLinksArray;
@@ -165,8 +165,9 @@ createDocumentFilename = function(singleDocumentArray){
 	//GETS: a pandocJSON
 	//RETURNS: a filename for the document made of the Pandoc-JSON.
 	var namestring;
-	if(singleDocumentArray.blocks[0].t === "Header"){
-		namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
+	if(singleDocumentArray.blocks[0].t === "Header"){ //if first block in array is a headline (should be the case)
+		namestring = singleDocumentArray.blocks[0].c[1][0]   // (c)ontent of the headline block (1)identifier array (0) identifier
+		//namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
 	}else{
 		namestring = pandoc.stringify(singleDocumentArray).slice(0,10).replace(/\W/g, ''); //this is rather inefficient to walk all the subtree (pandoc.stringify) to create a filename
 	}
