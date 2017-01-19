@@ -129,16 +129,16 @@ findLinks = function (documentsArray){ //finds internal links
 
 	var rewrittenLinksArray = [];
 
-	documentsArray.forEach(function(element, index, array){
+	documentsArray.forEach(function(origDocument, index, array){
 		rewrittenLinksArray[index]={};
 		rewrittenLinksArray[index].filename = createDocumentFilename(documentsArray[index]);
-		console.log("ELEMENT:\n \n ",element,"|", index);
+		console.log("origDocument:\n \n ",origDocument,"|", index);
 		rewrittenLinksArray[index].doc = pandoc.walk(
-				element,
+				origDocument,
 				function(type,value,format,meta){
+					//value[2][0] is the link target string
 					if (type === "Link" && value[2][0].indexOf("#") === 0){// === sourceLinkId.slice(1)){
-						console.log("in")
-						var targetIndex = findTargetIndex(documentsArray,value[1][0]);
+						var targetIndex = findTargetIndex(documentsArray,value[2][0]);
 
 						if(typeof targetIndex !== "number"){
 								return undefined; //no target found
@@ -156,7 +156,7 @@ findLinks = function (documentsArray){ //finds internal links
 							return {t:'Link',c:newValue};
 						}
 					};//endif
-				},"html",element.meta);//find links
+				},"html",origDocument.meta);//find links
 	});//end foreach
 	return rewrittenLinksArray;
 };//endfunction
@@ -174,7 +174,7 @@ createDocumentFilename = function(singleDocumentArray){
 	return namestring;
 };
 
-
+//TODO check for using the pandoc generated identfiers for filenames too
 findTargetIndex = function(documentsArray,sourceLinkId){ //
 	// gets documents array and sourceLinkId,
 	// returns the index of the document with the link target
