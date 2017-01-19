@@ -23,12 +23,18 @@ stdin().then(function(stringJSON){
 
 	var newDocs = findLinks(documentsArray); //returns array of Pandoc-JSONs with rewritten links and a string for filename.
 
-	//console.log(JSON.stringify(newDocs[1]));
-	/*
-	try 1doc, 2doc as input for pandoc with
-	pandoc -f json 1doc.json 1doc.html
+	//TODO: naming. New Docs could be linkedDocs or so.
+	var newDocsMetaWritten = addNavMeta(newDocs);
+	/*add metadata:
+	next file:
+	file before:
+	fileIndex:
+	chapters:Array of Objects of filename/Natural Title
 
+	Implementation: Go through newDocs. Difficulty: Easy.
 	*/
+
+	//TODO: How to generate the index/TOC?
 
 
 	//new docs: array[n].doc array[n].doc array[n]filename
@@ -39,8 +45,9 @@ stdin().then(function(stringJSON){
 		if (filename.length === 0){
 			filename = "filename"+index;
 		}
-		var pandocArguments = ["--from json",("-o "+filename+".html")];
+		var pandocArguments = ["--from json",("-o "+filename+".html"), " --toc", "--standalone"];
 		var pandocify = JSON.stringify(element.doc);
+		console.log(pandocArguments.join(" "));
 		var whathappend = child_process.execSync('pandoc'+' '+pandocArguments.join(" "),{input:pandocify});
 		console.log(whathappend);
 	});
@@ -175,7 +182,6 @@ createDocumentFilename = function(singleDocumentArray){
 	return namestring;
 };
 
-//TODO check for using the pandoc generated identfiers for filenames too
 findTargetIndex = function(documentsArray,sourceLinkId){ //
 	// gets documents array and sourceLinkId,
 	// returns the index of the document with the link target
@@ -193,3 +199,6 @@ findTargetIndex = function(documentsArray,sourceLinkId){ //
 	});
 	return 	targetDocumentIndex;
 };
+
+
+//addNavMeta = function(documentsArray){}
