@@ -16,15 +16,14 @@ MAYBE:
 var stdin  = require('get-stdin'),
 	pandoc = require('pandoc-filter'),
 	child_process = require('child_process'),
-	//json2yaml = require('json2yaml'),
 	underscore = require('underscore'),
 	getSplitpoints, //function
 	splitPandocJSONFull, //function
-	findLinks,
-	findTargetIndex,
-	createDocumentFilename,
-	addNavAdditionalMeta,
-	mergeMetadataToDoc;
+	findLinks, //function
+	findTargetIndex, //function
+	createDocumentFilename, //function
+	addNavAdditionalMeta,//function
+	mergeMetadataToDoc;//function
 
 
 stdin().then(function(stringJSON){
@@ -41,8 +40,6 @@ stdin().then(function(stringJSON){
 	//TODO: naming. New Docs could be linkedDocs or so.
 	//var newDocsMetaWritten = addNavMeta(newDocs);
 
-
-
 	//new docs: array[n].doc array[n].doc array[n]filename
 	newDocsWithMeta.forEach(function(element, index, array){
 		var process = "pandoc";
@@ -52,8 +49,9 @@ stdin().then(function(stringJSON){
 			filename = "filename"+index;
 		}
 
-		//TODO: only include -M eta if it is set, so we can use $if(foo)$" in templates
-		//pandoc overwrites previously set arguments with later ones. So…
+
+		//TODO: pandoc overwrites previously set arguments with later ones (at least -o notwrite.html - writethis.html). So one could pass user arguments, since I could overwrite them if need
+		//I can find the current directory of the script using __dirname which I could use for finding standard-templates and passing them to pandoc!
 
 		var pandocArguments = ["--from json","-o",filename, " --toc", "--standalone" , "--template=newhtmltemp.html"];
 		var pandocify = JSON.stringify(element.doc);
@@ -63,6 +61,7 @@ stdin().then(function(stringJSON){
 	});
 
 	//write Index
+
 	child_process.execSync('pandoc --from json -o index.html --standalone --template=indexhtmltemp.html',{input:JSON.stringify(newDocsWithMeta[0].doc)});
 
 	//also, one index page:
@@ -96,6 +95,7 @@ getSplitpoints = function(pandocJSONFull){
 		}
 	});
 
+	//TODO: Since there always should be a first page without chapter content as index page, move this to the splitPandocJSONFull function, since there the copying of the metadata etc. happens, which is needed (an empty blocks still can get metadata); first page would always be index and we would most likely not generate stupid filenames from paragraph starts anymore in this case.
 	if(splitPoints[0].mainindex>0){ //text starts not with a headline. Add fake splitpoint, so that begin will be included.
 		splitPoints.unshift({mainindex:0,title:""});
 	}
@@ -210,6 +210,9 @@ findTargetIndex = function(documentsArray,sourceLinkId){ //
 
 addNavAdditionalMeta = function(documentsArray){
 	//TODO: Maybe this should just return the metadata for a given document?
+
+	//TODO: if first does start with headline, create a 0-th doc as index file.
+
 	documentsArray.forEach(function(document,index,array){
 
 		var additionalMeta =  {};
