@@ -1,16 +1,30 @@
 /*
-Problems: Text always starts with first headline not with any Text.
+Tool gets PandocJSON via stdin
+Splits it at 1st level headlines into chapter-sized Pandoc-JSONs
+Writes these Pandoc-JSONs to htmls
+
+TODO:
+- proper index page
+- proper error handling
+
+MAYBE:
+- wrap the pandocJSON and the Pandoc-JSONs in an object which allows
+  a cleaner passing(flow).of(conversions)?
+-
+
 */
 var stdin  = require('get-stdin'),
 	pandoc = require('pandoc-filter'),
 	child_process = require('child_process'),
+	//json2yaml = require('json2yaml'),
+	underscore = require('underscore'),
 	getSplitpoints, //function
 	splitPandocJSONFull, //function
 	findLinks,
 	findTargetIndex,
 	createDocumentFilename,
-	callWalker,
-	titleSeperator = " – "; //seperates generalTitle from part Title
+	addNavAdditionalMeta,
+	mergeMetadataToDoc;
 
 
 stdin().then(function(stringJSON){
@@ -23,34 +37,37 @@ stdin().then(function(stringJSON){
 
 	var newDocs = findLinks(documentsArray); //returns array of Pandoc-JSONs with rewritten links and a string for filename.
 
+	var newDocsWithMeta = addNavAdditionalMeta(newDocs);
 	//TODO: naming. New Docs could be linkedDocs or so.
-	var newDocsMetaWritten = addNavMeta(newDocs);
-	/*add metadata:
-	next file:
-	file before:
-	fileIndex:
-	chapters:Array of Objects of filename/Natural Title
+	//var newDocsMetaWritten = addNavMeta(newDocs);
 
-	Implementation: Go through newDocs. Difficulty: Easy.
-	*/
-
-	//TODO: How to generate the index/TOC?
 
 
 	//new docs: array[n].doc array[n].doc array[n]filename
-	newDocs.forEach(function(element, index, array){
+	newDocsWithMeta.forEach(function(element, index, array){
 		var process = "pandoc";
 		var format = "html";
-		var filename = element.filename;
+		var filename = element.additionalMeta.filename;
 		if (filename.length === 0){
 			filename = "filename"+index;
 		}
-		var pandocArguments = ["--from json",("-o "+filename+".html"), " --toc", "--standalone"];
+
+		//TODO: only include -M eta if it is set, so we can use $if(foo)$" in templates
+		//pandoc overwrites previously set arguments with later ones. So…
+
+		var pandocArguments = ["--from json","-o",filename, " --toc", "--standalone" , "--template=newhtmltemp.html"];
 		var pandocify = JSON.stringify(element.doc);
 		console.log(pandocArguments.join(" "));
 		var whathappend = child_process.execSync('pandoc'+' '+pandocArguments.join(" "),{input:pandocify});
 		console.log(whathappend);
 	});
+
+	//write Index
+	child_process.execSync('pandoc --from json -o index.html --standalone --template=indexhtmltemp.html',{input:JSON.stringify(newDocsWithMeta[0].doc)});
+
+	//also, one index page:
+	//indexPage = generateIndexPage(newDocsWithMeta);
+	//child_process.execSync('pandoc')
 
 }).catch(function(reason){
 	console.error(reason);
@@ -96,7 +113,7 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 	//RETURNS: Array with Pandoc-JSONs, each a chapter of the original document
 	var chapterArray = [];
 
-
+	//rewrite as Array.map
 	splitPoints.forEach(function(element, index, array){
 		var startPoint=null,
 			endPoint=null,
@@ -117,13 +134,14 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 		chapterBlocks = pandocJSONFull.blocks.slice(startPoint, endPoint);
 
 		//create a synthetic pandoc JSON object from the
-		chapter={
+		chapter =
+		{
 			"meta": JSON.parse(JSON.stringify(pandocJSONFull.meta)), //sorta dirty trick to deep copy function-less objects: http://stackoverflow.com/a/122704/263398
 			"blocks": chapterBlocks,
 			"pandoc-api-version":JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
 		};
 
-		chapterArray.push(chapter); //TODO
+		chapterArray.push(chapter);
 	});
 
 	return chapterArray;
@@ -131,15 +149,19 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 
 findLinks = function (documentsArray){ //finds internal links
 	//DOES: rewrites all links in a pandocJSON which has internal links to external links if they link to another chapter.
-	//GETS: array with pandocJSON documents.
+	//GETS: array with several pandocJSON documents.
 	//RETURNS: array with pandocJSON documents with rewritten links.
 
 	var rewrittenLinksArray = [];
 
 	documentsArray.forEach(function(origDocument, index, array){
-		rewrittenLinksArray[index]={};
-		rewrittenLinksArray[index].filename = createDocumentFilename(documentsArray[index]);
-		console.log("origDocument:\n \n ",origDocument,"|", index);
+		rewrittenLinksArray[index]={
+			additionalMeta:{},
+			doc:null
+		};
+		rewrittenLinksArray[index].additionalMeta.filename = createDocumentFilename(documentsArray[index]);
+		rewrittenLinksArray[index].additionalMeta.naturalname = createDocumentNaturalName(documentsArray[index]);
+
 		rewrittenLinksArray[index].doc = pandoc.walk(
 				origDocument,
 				function(type,value,format,meta){
@@ -150,15 +172,13 @@ findLinks = function (documentsArray){ //finds internal links
 						if(typeof targetIndex !== "number"){
 								return undefined; //no target found
 						} else if (targetIndex === index) {
-							return undefined;//internal link can stay. Target is in the same document
+							return undefined; //internal link can stay. Target is in the same document
 						} else {
 							var filename = createDocumentFilename(documentsArray[targetIndex]);
 							var newValue = value;
-							//console.log("[",value[0],",",value[1],"]");
 
-							//return pandoc.Link(value[0],value[1]);
-
-							newValue[2][0] = filename+"."+format+value[2][0];//creates link to  OTHER document);
+							//value[2][0] being the internal link,  something like #foobar
+							newValue[2][0] = filename+value[2][0];//creates link to  OTHER document);
 							console.log(newValue);
 							return {t:'Link',c:newValue};
 						}
@@ -168,23 +188,11 @@ findLinks = function (documentsArray){ //finds internal links
 	return rewrittenLinksArray;
 };//endfunction
 
-createDocumentFilename = function(singleDocumentArray){
-	//GETS: a pandocJSON
-	//RETURNS: a filename for the document made of the Pandoc-JSON.
-	var namestring;
-	if(singleDocumentArray.blocks[0].t === "Header"){ //if first block in array is a headline (should be the case)
-		namestring = singleDocumentArray.blocks[0].c[1][0]   // (c)ontent of the headline block (1)identifier array (0) identifier
-		//namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
-	}else{
-		namestring = pandoc.stringify(singleDocumentArray).slice(0,10).replace(/\W/g, ''); //this is rather inefficient to walk all the subtree (pandoc.stringify) to create a filename
-	}
 
-	return namestring;
-};
 
 findTargetIndex = function(documentsArray,sourceLinkId){ //
-	// gets documents array and sourceLinkId,
-	// returns the index of the document with the link target
+	// GETS: documents array and sourceLinkId,
+	// returns the block[index] of the document with the link target
 	var targetDocumentIndex = null;
 
 	documentsArray.forEach(function(element, index, array){
@@ -200,5 +208,95 @@ findTargetIndex = function(documentsArray,sourceLinkId){ //
 	return 	targetDocumentIndex;
 };
 
+addNavAdditionalMeta = function(documentsArray){
+	//TODO: Maybe this should just return the metadata for a given document?
+	documentsArray.forEach(function(document,index,array){
 
-//addNavMeta = function(documentsArray){}
+		var additionalMeta =  {};
+
+		if(array[index+1]){ //is there a next?
+			documentsArray[index].additionalMeta.next = array[index+1].additionalMeta.filename;
+		}
+		if(array[index-1]){ //is there a before?
+			documentsArray[index].additionalMeta.before = array[index-1].additionalMeta.filename;
+		}
+
+		//following feels meh.
+		documentsArray[index].additionalMeta.allFilenames = documentsArray.map(
+			function(innerdocument,innerindex,innerarray){
+				var filename = innerdocument.additionalMeta.filename;
+				var naturalname = innerdocument.additionalMeta.naturalname;
+				var isMe = ((innerdocument.additionalMeta.filename === document.additionalMeta.filename)? true:false);
+				//if the document I currently collecting for the filename collection is identical to the current docuement, set to true. This way, the list "knows" if a filename/name in the collection concerns the document it is saved on. Useful to e.g. if you want to generate a navigation bar and mark the "you are here" link.
+			return {
+				"filename":filename,
+				"name":naturalname,
+				"isMe":isMe
+				};
+			}
+		);
+
+		//merge the created additionalMetadata into the document object.
+		console.log(documentsArray[index].additionalMeta);
+		documentsArray[index].doc = mergeMetadataToDoc(documentsArray[index].doc,documentsArray[index].additionalMeta);
+	});
+
+	return documentsArray;
+ };
+
+
+// -----------------------------------------------------------------------
+// HELPERS – These Helpers that don’t spit out
+// a transformed list of documents but are
+// called from the functions which do so.
+// ------------------------------------------------------------------------
+
+createDocumentFilename = function(singleDocumentArray){
+	//DOES: Create a chapter-title-based filename for a chapter
+	//GETS: a pandocJSON
+	//RETURNS: a filename for the document made of the Pandoc-JSON.
+	var namestring;
+	if(singleDocumentArray.blocks[0].t === "Header"){ //if first block in array is a headline (should be the case)
+		namestring = singleDocumentArray.blocks[0].c[1][0];   // (c)ontent of the headline block (1)identifier array (0) identifier
+		//namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
+	}else{
+		namestring = pandoc.stringify(singleDocumentArray).slice(0,10).replace(/\W/g, ''); //this is rather inefficient to walk all the subtree (pandoc.stringify) to create a filename
+	}
+	namestring = namestring+".html";
+	return namestring;
+};
+
+createDocumentNaturalName = function(singleDocumentArray){
+	//DOES: give a human readable name; if the first block is a headline, it is its stringified value.
+	//GETS: a pandocJSON
+	//RETURNS: a string
+
+	var namestring;
+
+	if(singleDocumentArray.blocks[0].t === "Header"){
+		namestring = pandoc.stringify(singleDocumentArray.blocks[0]);
+	}else{
+		namestring = pandoc.stringify(singleDocumentArray.blocks[0]).slice(0,10); //since a paragraph could be rather long, we take the first 10 chars
+	}
+
+	return namestring;
+};
+
+mergeMetadataToDoc = function(pandocJSON, metadataJSON){
+	// DOES: Merge JSON-defined metadata in adocument (which is returned)
+	// GETS: a pandocJSON and a JSON with metadata
+	// RETURNS: a pandocJSON
+	// ERRORS/LOGs:
+	// DEPENDS ON: pandoc binary, underscore (?)
+
+	//Originally, I wanted to use json2yaml. Turns out, YAML is a superset of JSON. Pandoc needs the YAML --- end and beginning in the string, though.
+	var pandocifiedMetadataJSON = "\n---\n"+JSON.stringify(metadataJSON)+"\n---"; //very careful with the start and end indocators; getting them wring causes them to be parsed as text and the metadatastuff fails.
+
+	var metadataPandocBuffer = child_process.execSync('pandoc -t json',{input:pandocifiedMetadataJSON}); //could benefit from structor; I only want the "meta" block of it.
+	var metadataPandocJSON = JSON.parse(metadataPandocBuffer.toString()); //The output comes as a sort of array of numbers. toString makes it a JSON-like string, which is then parsed.
+
+	//merge the tempoary metadata-pandoc-JSON with the document’s metadata.
+	pandocJSON.meta = underscore.extend(pandocJSON.meta,metadataPandocJSON.meta); //TODO: could be replaced by a copy of the used underscore function
+
+	return pandocJSON;
+};
