@@ -148,7 +148,7 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 	//add index page to chapter array:
 	chapterArray.push({
 		"meta": JSON.parse(JSON.stringify(pandocJSONFull.meta)),
-		"blocks":pandocJSONFull.blocks.slice(0, splitPoints[0]),
+		"blocks":pandocJSONFull.blocks.slice(0, splitPoints[0].mainindex),//slice out the blocks from start until first headline
 		"pandoc-api-version":JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
 	});
 
