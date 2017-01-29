@@ -11,7 +11,7 @@ var stdin  = require('get-stdin'),
 	pandoc = require('pandoc-filter'),
 	child_process = require('child_process'),
 	path = require('path'),
-	underscore = require('underscore'),
+	//underscore = require('underscore'),
 	cli = require('cli'),
 	getSplitpoints, //function
 	splitPandocJSONFull, //function
@@ -22,18 +22,21 @@ var stdin  = require('get-stdin'),
 	mergeMetadataToDoc;//function
 
 var config = {
-	default_indexTemplate:__dirname+"/"+"newhtmltemp.html",
-	default_chapterTemplate:__dirname+"/"+"newhtmltemp.html"
+	'default_indexTemplate':__dirname+"/"+"newhtmltemp.html",
+	'default_chapterTemplate':__dirname+"/"+"newhtmltemp.html"
 };
 // Configure program and arguments
 
 
-var cliArguments = cli.parse({
-    indextemplate: [ false, 'index template', 'file', config.default_indexTemplate],          // -f, --file FILE   A file to process
-    chaptertemplate: [ false, 'chapter template', 'file', config.default_indexTemplate],                 // -t, --time TIME   An access time
-    indexpandoc: [ false, 'passed to pandoc', 'string', '' ],
-	chapterpandoc: [false,'passed to pandoc', 'string', '']
-});
+var cliArguments = cli.parse( //syntax: {longargument (like --foo):[shortargument (like -a), 'description', 'type', default],…
+	{
+	    'indextemplate': [ false, 'index template', 'file', config.default_indexTemplate],
+	    'chaptertemplate': [ false, 'chapter template', 'file', config.default_indexTemplate],
+		'defaultpandoc':[false, 'passed to pandoc','string',''],
+		'indexpandoc': [ false, 'passed to pandoc', 'string', '' ],
+		'chapterpandoc': [false,'passed to pandoc', 'string', '']
+	}
+);
 
 
 
@@ -48,7 +51,7 @@ var cliArguments = cli.parse({
 
 // main function reading from stdin
 stdin().then(function(stringJSON){
-	console.log("gotstdin");
+
 	var pandocJSONFull =  JSON.parse(stringJSON);
 
 	var splits = getSplitpoints(pandocJSONFull); //helper to generate markers of where to split the document
@@ -63,14 +66,14 @@ stdin().then(function(stringJSON){
 
 	//new docs: array[n].doc array[n].doc array[n]filename
 	//write Index
-	child_process.execSync('pandoc --from json -o index.html --standalone ' +
+	child_process.execSync('pandoc --from json -t html5 -o index.html --standalone ' +
 		'--template='+cliArguments.indextemplate+
-		" "+cliArguments.indexpandoc,{input:JSON.stringify(newDocsWithMeta[0].doc)});
+		" "+cliArguments.defaultpandoc+" "+cliArguments.indexpandoc,{input:JSON.stringify(newDocsWithMeta[0].doc)});
 
 	newDocsWithMeta.slice(1).forEach(function(element, index, array){ //for all except the 1st
 		var process = "pandoc";
 		var format = "html";
-		var filename = element.additionalMeta.filename;
+		var filename = element.additionalMeta.chapterfilename;
 
 		if (filename.length === 0){
 			filename = "filename"+index;
@@ -81,11 +84,9 @@ stdin().then(function(stringJSON){
 		//I can find the current directory of the script using __dirname which I could use for finding standard-templates and passing them to pandoc. A direct reference like mytemplatehtml will always be evaluated in the context of the folder the script is executed in.
 		//this current folder I can get by __dirname; the folder I need for directing to possibel side files like  templates is ""
 
-		var pandocArguments = ["--from json","-o",filename, "--standalone" , '--template='+cliArguments.chaptertemplate,cliArguments.chapterpandoc];
+		var pandocArguments = ["--from json -t html5","-o",filename, "--standalone" , '--template='+cliArguments.chaptertemplate,cliArguments.defaultpandoc,cliArguments.chapterpandoc];
 		var pandocify = JSON.stringify(element.doc);
-		console.log(pandocArguments.join(" "));
 		var whathappend = child_process.execSync('pandoc'+' '+pandocArguments.join(" "),{input:pandocify});
-		console.log(whathappend);
 	});
 
 
@@ -118,8 +119,8 @@ getSplitpoints = function(pandocJSONFull){
 	pandocJSONFull.blocks.forEach(function(element, index, array){
 		if (element.t === "Header" && element.c[0] == 1){//is a headline && headline first is 1st order aka "chapter"
 			splitPoints.push({
-				"mainindex":index,
-				"title":pandoc. //NOTE: Do I ever need th title? For the filenames and links, the title/filename is generated in the "findLinks" function
+				'mainindex':index,
+				'title':pandoc. //NOTE: Do I ever need th title? For the filenames and links, the title/filename is generated in the "findLinks" function
 					stringify(element.c). //stringify makes a part of the tree to a simple string with no formatting
 					replace(/\W/g, '') 	//Strips all non-word characters
 								//TODO: what about öä etc.? "ae äé".replace(/\W/,"") strips "ä" but not "é"
@@ -147,17 +148,17 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 
 	//add index page to chapter array:
 	chapterArray.push({
-		"meta": JSON.parse(JSON.stringify(pandocJSONFull.meta)),
-		"blocks":pandocJSONFull.blocks.slice(0, splitPoints[0].mainindex),//slice out the blocks from start until first headline
-		"pandoc-api-version":JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
+		'meta': JSON.parse(JSON.stringify(pandocJSONFull.meta)),
+		'blocks':pandocJSONFull.blocks.slice(0, splitPoints[0].mainindex),//slice out the blocks from start until first headline
+		'pandoc-api-version':JSON.parse(JSON.stringify(pandocJSONFull['pandoc-api-version']))
 	});
 
 	//rewrite as Array.map
 	splitPoints.forEach(function(element, index, array){
-		var startPoint=null,
-			endPoint=null,
-			chapter ={},
-			chapterBlocks =[];
+		var startPoint = null,
+			endPoint = null,
+			chapter = {},
+			chapterBlocks = [];
 
 		startPoint = element.mainindex;
 
@@ -177,9 +178,9 @@ splitPandocJSONFull = function(pandocJSONFull, splitPoints){
 		//create a synthetic pandoc JSON object from the
 		chapter =
 		{
-			"meta": JSON.parse(JSON.stringify(pandocJSONFull.meta)), //sorta dirty trick to deep copy function-less objects: http://stackoverflow.com/a/122704/263398
-			"blocks": chapterBlocks,
-			"pandoc-api-version":JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
+			'meta': JSON.parse(JSON.stringify(pandocJSONFull.meta)), //sorta dirty trick to deep copy function-less objects: http://stackoverflow.com/a/122704/263398
+			'blocks': chapterBlocks,
+			'pandoc-api-version':JSON.parse(JSON.stringify(pandocJSONFull["pandoc-api-version"]))
 		};
 
 		chapterArray.push(chapter);
@@ -197,11 +198,11 @@ findLinks = function (documentsArray){ //finds internal links
 
 	documentsArray.forEach(function(origDocument, index, array){
 		rewrittenLinksArray[index]={
-			additionalMeta:{},
-			doc:null
+			'additionalMeta':{},
+			'doc':null
 		};
-		rewrittenLinksArray[index].additionalMeta.filename = createDocumentFilename(documentsArray,index);
-		rewrittenLinksArray[index].additionalMeta.naturalname = createDocumentNaturalName(documentsArray,index);
+		rewrittenLinksArray[index].additionalMeta.chapterfilename = createDocumentFilename(documentsArray,index);
+		rewrittenLinksArray[index].additionalMeta.chapternaturalname = createDocumentNaturalName(documentsArray,index);
 
 		rewrittenLinksArray[index].doc = pandoc.walk(
 				origDocument,
@@ -220,7 +221,6 @@ findLinks = function (documentsArray){ //finds internal links
 
 							//value[2][0] being the internal link,  something like #foobar
 							newValue[2][0] = filename+value[2][0];//creates link to  OTHER document);
-							console.log(newValue);
 							return {t:'Link',c:newValue};
 						}
 					}//endif
@@ -259,29 +259,34 @@ addNavAdditionalMeta = function(documentsArray){
 		var additionalMeta =  {};
 
 		if(array[index+1]){ //is there a next?
-			documentsArray[index].additionalMeta.next = array[index+1].additionalMeta.filename;
+			documentsArray[index].additionalMeta.next = {
+				'chapterfilename': array[index+1].additionalMeta.chapterfilename,
+				'chapternaturalname': array[index+1].additionalMeta.chapternaturalname
+			};
 		}
 		if(array[index-1]){ //is there a before?
-			documentsArray[index].additionalMeta.before = array[index-1].additionalMeta.filename;
+			documentsArray[index].additionalMeta.before = {
+				'chapterfilename':array[index-1].additionalMeta.chapterfilename,
+				'chapternaturalname':array[index-1].additionalMeta.chapternaturalname
+			};
 		}
 
 		//following feels meh.
-		documentsArray[index].additionalMeta.allFilenames = documentsArray.map(
+		documentsArray[index].additionalMeta.allChapters = documentsArray.map(
 			function(innerdocument,innerindex,innerarray){
-				var filename = innerdocument.additionalMeta.filename;
-				var naturalname = innerdocument.additionalMeta.naturalname;
-				var isMe = ((innerdocument.additionalMeta.filename === document.additionalMeta.filename)? true:false);
+				var filename = innerdocument.additionalMeta.chapterfilename;
+				var naturalname = innerdocument.additionalMeta.chapternaturalname;
+				var isMe = ((innerdocument.additionalMeta.chapterfilename === document.additionalMeta.chapterfilename)? true:false);
 				//if the document I currently collecting for the filename collection is identical to the current docuement, set to true. This way, the list "knows" if a filename/name in the collection concerns the document it is saved on. Useful to e.g. if you want to generate a navigation bar and mark the "you are here" link.
 			return {
-				"filename":filename,
-				"name":naturalname,
-				"isMe":isMe
+				'filename':filename,
+				'name':naturalname,
+				'isMe':isMe
 				};
 			}
 		);
 
 		//merge the created additionalMetadata into the document object.
-		console.log(documentsArray[index].additionalMeta);
 		documentsArray[index].doc = mergeMetadataToDoc(documentsArray[index].doc,documentsArray[index].additionalMeta);
 	});
 
@@ -307,7 +312,7 @@ createDocumentFilename = function(documentArray, index){
 	} else if (currentDocument.blocks[0].t === "Header"){ //if first block in array is a headline (should be the case)
 		namestring = currentDocument.blocks[0].c[1][0];   // (c)ontent of the headline block (1)identifier array (0) identifier
 		//namestring = pandoc.stringify(singleDocumentArray.blocks[0].c).replace(/\W/g, '');//http://stackoverflow.com/questions/9364400/remove-not-alphanumeric-characters-from-string-having-trouble-with-the-char
-	}else{
+	} else {
 		namestring = pandoc.stringify(currentDocument).slice(0,10).replace(/\W/g, ''); //this is rather inefficient to walk all the subtree (pandoc.stringify) to create a filename
 	}
 	namestring = namestring+".html";
@@ -347,7 +352,7 @@ mergeMetadataToDoc = function(pandocJSON, metadataJSON){
 	var metadataPandocJSON = JSON.parse(metadataPandocBuffer.toString()); //The output comes as a sort of array of numbers. toString makes it a JSON-like string, which is then parsed.
 
 	//merge the tempoary metadata-pandoc-JSON with the document’s metadata.
-	pandocJSON.meta = underscore.extend(pandocJSON.meta,metadataPandocJSON.meta); //TODO: could be replaced by a copy of the used underscore function
+	pandocJSON.meta = Object.assign(pandocJSON.meta,metadataPandocJSON.meta);
 
 	return pandocJSON;
 };
